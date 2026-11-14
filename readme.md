@@ -85,10 +85,71 @@ a reachable repository first; uncommitted host changes are not copied into the
 build. Do not put credentials in build arguments. Private repository access is
 not configured by these scripts.
 
-Runtime `--ecmc-version`, `--ecmccfg-version` and `--ecmccomp-version` select
-versions **already installed in an image**; they do not download or build them.
-Normally each image contains one version of each and the launcher detects them.
-Use separate image tags to keep different combinations installed side by side.
+You can also build and start the simulation in one command. Specify a remote
+URL and a branch, tag or commit for each module you want to change:
+
+```bash
+./run-sim.sh --ioc-name SIMIOC --hardware-sim \
+  --ecmc-remote https://github.com/anderssandstrom/ecmc.git \
+  --ecmc-ref YOUR_ECMC_BRANCH \
+  --ecmccfg-remote https://github.com/anderssandstrom/ecmccfg.git \
+  --ecmccfg-ref YOUR_CFG_BRANCH \
+  --ecmccomp-remote https://github.com/paulscherrerinstitute/ecmccomp.git \
+  --ecmccomp-ref YOUR_COMPONENT_TAG \
+  examples/smoke/startup.cmd
+```
+
+Each `--MODULE-ref` implies rebuilding; explicit `--rebuild-ecmc`,
+`--rebuild-ecmccfg` and `--rebuild-ecmccomp` flags are also accepted and require
+the corresponding ref. Remote URLs are optional and default to those shown
+above. You can select just one module or any combination. Requested sources
+are fetched on every rebuild so moving branches are refreshed. Earlier image
+layers are reused when available; layers after a changed module may also rebuild.
+The IOC starts only after a successful build.
+
+The output image defaults to `ecmc-dev:simulation`; use `--image TAG` to choose
+another tag. The build uses this repository's Containerfile and defaults for
+unspecified sources, rather than modifying the existing image. Module version
+options also set installed module names during a build. Without rebuild options,
+they only select versions already installed in the image. Installed module names
+do not automatically follow source branch/tag names.
+
+Use `--dry-run` to print both commands without building or starting anything.
+
+For example, rebuild ECMC and ecmccfg from `v11.2.0_RC1` in the
+`anderssandstrom` repositories and start the smoke test with hardware simulation:
+
+```bash
+./run-sim.sh \
+  --ioc-name SIMIOC \
+  --hardware-sim \
+  --ecmc-remote https://github.com/anderssandstrom/ecmc.git \
+  --ecmc-ref v11.2.0_RC1 \
+  --ecmc-version v11.2.0_RC1 \
+  --ecmccfg-remote https://github.com/anderssandstrom/ecmccfg.git \
+  --ecmccfg-ref v11.2.0_RC1 \
+  --ecmccfg-version v11.2.0_RC1 \
+  examples/smoke/startup.cmd
+```
+
+Both modules are installed with `LIBVERSION=v11.2.0_RC1`; ecmccomp uses its
+default source and installed version. The resulting image is
+`ecmc-dev:simulation`.
+
+To start the IOC and hardware simulation again using that image without
+fetching or rebuilding:
+
+```bash
+./run-sim.sh --image ecmc-dev:simulation \
+  --ioc-name SIMIOC \
+  --hardware-sim \
+  examples/smoke/startup.cmd
+```
+
+Both examples start the Python hardware models with simulation PV prefix
+`SIMIOC:SIM:`. Replace `examples/smoke/startup.cmd` with your startup file;
+add `--root /path/to/configuration/tree` if it includes files from parent
+directories.
 
 ## Reproducibility and architectures
 

@@ -12,6 +12,15 @@ Options:
   --root DIRECTORY    Mount this configuration tree instead of the startup directory
   --env NAME=value    Set a container environment variable (repeatable)
   --ecmc-version VER  Select an installed ecmc version if several exist
+  --rebuild-ecmc      Build the simulation image before running (requires --ecmc-ref)
+  --ecmc-remote URL   ECMC Git repository (default: https://github.com/anderssandstrom/ecmc.git)
+  --ecmc-ref REF      ECMC branch, tag or commit to build (implies --rebuild-ecmc)
+  --rebuild-ecmccfg   Rebuild ecmccfg (requires --ecmccfg-ref)
+  --ecmccfg-remote URL  ecmccfg Git repository
+  --ecmccfg-ref REF   ecmccfg branch, tag or commit (implies rebuild)
+  --rebuild-ecmccomp  Rebuild ecmccomp (requires --ecmccomp-ref)
+  --ecmccomp-remote URL  ecmccomp Git repository
+  --ecmccomp-ref REF  ecmccomp branch, tag or commit (implies rebuild)
   --ecmccfg-version VER  Select an installed ecmccfg version if several exist
   --ecmccomp-version VER  Select installed component definitions
   --hardware-sim      Start Python hardware models alongside the IOC (headless)
@@ -28,11 +37,28 @@ read-only. Use --root for includes referring to parent/sibling directories.
 By default, a temporary startup copy uses SIM=1 and installed ecmc/ecmccfg/ecmccomp
 versions. Only require lines in the supplied startup file are rewritten.
 Additional MACRO=value arguments are passed to the PSI iocsh launcher.
+Rebuilds use --image as the output tag (default when rebuilding: ecmc-dev:simulation).
+Dependency layers are cached; requested sources are fetched again on every rebuild.
+When rebuilding, --MODULE-version also sets that installed module version.
+Unspecified sources use Containerfile defaults, not the previous image contents.
 EOF
 }
 
 fail() { printf 'run-sim: %s\n' "$*" >&2; exit 1; }
 image=ecmc-dev:v11.2.0_RC1
+image_explicit=0
+rebuild_ecmc=0
+ecmc_remote=https://github.com/anderssandstrom/ecmc.git
+ecmc_ref=
+ecmc_version=
+rebuild_ecmccfg=0
+rebuild_ecmccomp=0
+ecmccfg_remote=https://github.com/anderssandstrom/ecmccfg.git
+ecmccomp_remote=https://github.com/paulscherrerinstitute/ecmccomp.git
+ecmccfg_ref=
+ecmccomp_ref=
+ecmccfg_version=
+ecmccomp_version=
 root=
 ioc_name=
 hardware_sim=0
@@ -47,28 +73,37 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        --image|--root|--env|--ecmc-version|--ecmccfg-version|--ecmccomp-version|--ioc-name|--sim-prefix|--sim-master|--sim-settings)
-            (($# >= 2)) || fail "$1 requires a value"
+        --image|--root|--env|--ecmc-version|--ecmccfg-version|--ecmccomp-version|--ioc-name|--sim-prefix|--sim-master|--sim-settings|--ecmc-remote|--ecmc-ref|--ecmccfg-remote|--ecmccfg-ref|--ecmccomp-remote|--ecmccomp-ref)
+            (($# >= 2)) && [[ -n $2 ]] || fail "$1 requires a value"
             case "$1" in
+                --ecmc-remote) ecmc_remote=$2; rebuild_ecmc=1 ;;
+                --ecmc-ref) ecmc_ref=$2; rebuild_ecmc=1 ;;
+                --ecmccfg-remote) ecmccfg_remote=$2; rebuild_ecmccfg=1 ;;
+                --ecmccfg-ref) ecmccfg_ref=$2; rebuild_ecmccfg=1 ;;
+                --ecmccomp-remote) ecmccomp_remote=$2; rebuild_ecmccomp=1 ;;
+                --ecmccomp-ref) ecmccomp_ref=$2; rebuild_ecmccomp=1 ;;
                 --sim-prefix) sim_prefix=$2 ;;
                 --sim-master)
                     [[ $2 =~ ^[0-9]+$ ]] || fail '--sim-master expects a nonnegative integer'
                     sim_master=$2 ;;
                 --sim-settings) sim_settings=$2 ;;
-                --ecmccomp-version) env_args+=(--env "RUN_SIM_ECMCCOMP_VERSION=$2") ;;
-                --image) image=$2 ;;
+                --ecmccomp-version) ecmccomp_version=$2; env_args+=(--env "RUN_SIM_ECMCCOMP_VERSION=$2") ;;
+                --image) image=$2; image_explicit=1 ;;
                 --root) root=$2 ;;
                 --ioc-name)
                     [[ -n $2 && $2 != -* && $2 != *[[:space:]]* ]] || fail 'IOC name must be nonempty, contain no whitespace, and not start with -'
                     ioc_name=$2 ;;
-                --ecmc-version) env_args+=(--env "RUN_SIM_ECMC_VERSION=$2") ;;
-                --ecmccfg-version) env_args+=(--env "RUN_SIM_ECMCCFG_VERSION=$2") ;;
+                --ecmc-version) ecmc_version=$2; env_args+=(--env "RUN_SIM_ECMC_VERSION=$2") ;;
+                --ecmccfg-version) ecmccfg_version=$2; env_args+=(--env "RUN_SIM_ECMCCFG_VERSION=$2") ;;
                 --env)
                     [[ $2 =~ ^[a-zA-Z_][a-zA-Z0-9_]*= ]] || fail '--env expects NAME=value'
                     env_args+=(--env "$2") ;;
             esac
             shift 2 ;;
         --hardware-sim) hardware_sim=1; shift ;;
+        --rebuild-ecmc) rebuild_ecmc=1; shift ;;
+        --rebuild-ecmccfg) rebuild_ecmccfg=1; shift ;;
+        --rebuild-ecmccomp) rebuild_ecmccomp=1; shift ;;
         --no-ports) ports=0; shift ;;
         --as-is) auto_config=0; shift ;;
         --dry-run) dry_run=1; shift ;;
@@ -77,6 +112,28 @@ while (($#)); do
         *) break ;;
     esac
 done
+rebuild=0
+build_args=()
+for module in ecmc ecmccfg ecmccomp; do
+    rebuild_var=rebuild_$module
+    ref_var=${module}_ref
+    remote_var=${module}_remote
+    version_var=${module}_version
+    if (( ${!rebuild_var} )); then
+        ref=${!ref_var}
+        remote=${!remote_var}
+        [[ -n $ref ]] || fail "--rebuild-$module/--$module-remote requires --$module-ref"
+        [[ $ref != -* && $remote != -* ]] || fail 'Source remote and ref must not start with -'
+        key=$(printf '%s' "$module" | tr '[:lower:]' '[:upper:]')
+        build_args+=("--$module-ref" "$ref" --build-arg "${key}_REPOSITORY=$remote"
+                     --build-arg "${key}_REFRESH=$(date +%s)-$$-$RANDOM")
+        rebuild=1
+    fi
+    if [[ -n ${!version_var} ]]; then
+        build_args+=("--$module-version" "${!version_var}")
+    fi
+done
+if ((rebuild && !image_explicit)); then image=ecmc-dev:simulation; fi
 (($#)) || { usage >&2; exit 1; }
 startup=$1
 shift
@@ -129,6 +186,11 @@ if [[ -n $sim_settings ]]; then
           --env RUN_SIM_SETTINGS=/run/ecmc-models.json)
 fi
 cmd+=("$image" /bin/bash /run/ecmc-runner/run-ioc.sh "./$startup_name" "$@")
+if ((rebuild)); then
+    build_cmd=("$script_dir/build-image.sh" --image "$image" "${build_args[@]}")
+    if ((dry_run)); then build_cmd+=(--dry-run); fi
+    "${build_cmd[@]}"
+fi
 if ((dry_run)); then
     printf '%q ' "${cmd[@]}"
     printf '\n'

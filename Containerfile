@@ -243,7 +243,10 @@ WORKDIR /opt/ECMC_makefile/ecmc
 
 ARG ECMC_REPOSITORY=https://github.com/anderssandstrom/ecmc.git
 ARG ECMC_REF=fc414a250c5bc720e81c47d66db3dc043a47e0dd
-RUN checkout-source "$ECMC_REPOSITORY" "$ECMC_REF" /opt/ECMC_makefile/ecmc
+# Changed by run-sim.sh when a fresh fetch of a moving branch/tag is requested.
+ARG ECMC_REFRESH=
+RUN echo "ECMC refresh: $ECMC_REFRESH" \
+    && checkout-source "$ECMC_REPOSITORY" "$ECMC_REF" /opt/ECMC_makefile/ecmc
 
 
 # ======================================================================
@@ -327,7 +330,9 @@ WORKDIR /opt
 ARG ECMCCOMP_REPOSITORY=https://github.com/paulscherrerinstitute/ecmccomp.git
 ARG ECMCCOMP_REF=a90964dea22323fcf797a9286044c0d0f68a9fce
 ARG ECMCCOMP_VERSION=PSI_default
-RUN checkout-source "$ECMCCOMP_REPOSITORY" "$ECMCCOMP_REF" /opt/ecmccomp
+ARG ECMCCOMP_REFRESH=
+RUN echo "ECMCCOMP refresh: $ECMCCOMP_REFRESH" \
+    && checkout-source "$ECMCCOMP_REPOSITORY" "$ECMCCOMP_REF" /opt/ecmccomp
 
 WORKDIR /opt/ecmccomp
 
@@ -362,7 +367,9 @@ WORKDIR /opt
 ARG ECMCCFG_REPOSITORY=https://github.com/anderssandstrom/ecmccfg.git
 ARG ECMCCFG_REF=aecae59837063ffe892b7e610430d42ca4e7243f
 ARG ECMCCFG_VERSION=v11.2.0_RC1
-RUN checkout-source "$ECMCCFG_REPOSITORY" "$ECMCCFG_REF" /opt/ecmccfg
+ARG ECMCCFG_REFRESH=
+RUN echo "ECMCCFG refresh: $ECMCCFG_REFRESH" \
+    && checkout-source "$ECMCCFG_REPOSITORY" "$ECMCCFG_REF" /opt/ecmccfg
 
 WORKDIR /opt/ecmccfg
 
