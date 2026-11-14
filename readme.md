@@ -39,7 +39,11 @@ For your machine:
 ```bash
 ./run-sim.sh --ioc-name SIMIOC /path/to/configuration/startup.cmd
 ```
-
+Connect to IOC with caqtdm:
+```
+export EPICS_CA_ADDR_LIST=127.0.0.1
+caqtdm -macro IOC=SIMIOC ecmcMain.ui
+```
 Type `exit` at the IOC prompt to stop. The temporary container is removed.
 The build defaults to tag `ecmc-dev:v11.2.0_RC1`; use `--image` on both scripts
 for a different image. Rebuild older images to get packaged Python models and
